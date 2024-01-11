@@ -45,7 +45,7 @@ def save_experiment(start_time, end_time, transients, amp, voltage, directory):
     except Exception as e:
         print(e)
     # also save individual experiments to avoid any data loss
-    df.to_csv(f"~/Documents/LBNL2023/" + directory + "_{experiment}_{time.time()}.csv", index=False)
+    df.to_csv(f"~/Documents/LBNL2023/" + directory + f"_{experiment}_{time.time()}.csv", index=False)
 
 def clearSMU():
     smu.errorqueue.clear()
