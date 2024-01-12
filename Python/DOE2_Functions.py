@@ -92,7 +92,7 @@ def bankNum(bank, folder):
         
     fileLoc = str(p) + "\\Documents\\SkywaterData\\DOE2\\" + str(folder) + "\\Bank " + str(bank) + "\\" + str(folder)
     rowStart = 0 + 1
-    rowEnd = rowStart + 1 
+    rowEnd = rowStart + 30 
     vg = 3.3
     
     if folder == 'currentSweep':                     
@@ -109,10 +109,10 @@ def bankNum(bank, folder):
         holdTime = 20  
         limitv = 3.3                        # voltage source limit of SMU
         rangev = 20                         # voltage measurement range of SMU
-        period = timeTest / 2               # period of duty cycle for CTIA reset pin
+        period = 40                         # period of duty cycle for CTIA reset pin
         measDelay = 0.0005                  # measurement timer delay     # 2 kHz
         nplc = 0.027 / 60                   # integration time. has to be faster than measDelay
-        Iref = -1e-6                        # Value applied to Iref. Id is Iref/10 
+        Iref = -9e-5                        # Value applied to Iref. Id is Iref/10 
         sampRate = 1 / (measDelay * 1000)   # sample rate of the SMU        
         csIn = 4                            # Case select for pico
         send = rowStart, rowEnd, colStart, colEnd, csIn, fileLoc, measDelay, nplc, vg, Iref, timeTest, holdTime, sampRate, limitv, rangev, period    
@@ -554,11 +554,16 @@ def rtsEval(bank, dieX, dieY):
     RTSCounter = 0                                                                # Counter variable for RTS detection(Jay Kim 06/06/23 9:04PM)
     SlowTrapCounter = 0                                                           # Counter variable for SlowTrapRTS detection(Jay Kim 06/06/23 9:04PM)
     DeviceCounter = 0                                                             # Counter variable for Device Counter(Jay Kim 06/06/23 9:04PM)
+    # loopCounter = 0
     for row in range(rowStart, rowEnd):
+        
+        # row = 1
         for col in range(colStart, colEnd):
+            d_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
             DeviceCounter += 1                                                    #Device Counter
             print('Device Count:', DeviceCounter)
             vOut = pd.DataFrame(data=[], index=[], columns=[])
+            # col = 6
             write_cmd(f"{csIn},{row},{col}")                                                   # selects the switch case on the pico
             commandRX, rowRX, columnRX = tuple(pico.read_until().strip().decode().split(','))
             rowRX = re.sub(r'[0-9]+$',
@@ -571,28 +576,30 @@ def rtsEval(bank, dieX, dieY):
             print('pico selected row: ' + str(rowRX))
             print('pico selected column: ' + str(columnRX))
             commandRX = int(pico.read_until().strip().decode())                             # confirms shift registers are loaded
-            print(f'pico loaded the shift registers')                           # confirms shift registers are loaded
+            print(f'Pi Pico loaded the shift registers.')                           # confirms shift registers are loaded
 
             smu._write(value = "smua.measure.autozero = smua.AUTOZERO_AUTO")
             smu._write(value = "smua.source.output = smub.OUTPUT_ON")
             smu.smua.measure.v()
             smu.apply_current(smu.smub, Iref)
-            smu._write(value="node[2].smua.source.func = smua.OUTPUT_DCAMPS")
-            smu._write(value="node[2].smua.source.output = smua.OUTPUT_ON")
+            # smu._write(value="node[2].smub.source.func = smub.OUTPUT_DCAMPS")
+            # smu._write(value="node[2].smub.source.output = smub.OUTPUT_ON")
+            print('Holding for ' + str(holdTime)+ " seconds.")
             time.sleep(holdTime)
-            print("Starting Test")
-            write_cmd(f"{5},{.5}, {timeTest}") 
-            commandRX, rowRX, columnRX = tuple(pico.read_until().strip().decode().split(','))
+            print("Starting " + str(timeTest) + " Second Test.")
+            write_cmd(f"{5},{timeTest}, {period}")                              # ({command}, {seconds of test time}, {seconds of period})
+            a, b, c = tuple(pico.read_until().strip().decode().split(','))
             
-            vOut['V_C Out'] = smu.sourceA_measAB(smu.smub, smu.smua, Iref, timeTest, holdTime, measDelay, nplc, rangev, limitv)     # run the script on smu
-            vOut['Vsg'] = np.full_like(vOut['V_C Out'], vg) - vOut['V_C Out']
-            vOut['Id'] = -Iref/10
-            vOut['Sample_Rate(kHz)'] = sampRate
-            vOut['Ticks'] = np.linspace(0, timeTest, len(vOut['V_C Out'])) 
-            vOut['Column'] = columnRX
-            vOut['Row'] = rowRX
-            vOut['DieX'] = dieX
-            vOut['DieY'] = dieY
+            vOut['V_C Out']             = smu.sourceA_measAB(smu.smub, smu.smua, Iref, timeTest, holdTime, measDelay, nplc, rangev, limitv)     # run the script on smu
+            vOut['Vsg']                 = np.full_like(vOut['V_C Out'], vg) - vOut['V_C Out']
+            vOut['Iref']                = Iref
+            vOut['Id']                  = -Iref/10
+            vOut['Sample_Rate(kHz)']    = sampRate
+            vOut['Ticks']               = np.linspace(0, timeTest, len(vOut['V_C Out'])) 
+            vOut['Column']              = columnRX
+            vOut['Row']                 = rowRX
+            vOut['DieX']                = dieX
+            vOut['DieY']                = dieY
             print(len(vOut))
             rtsData = pd.concat([rtsData, vOut], axis = 0, ignore_index=True)           # save the new data with old data
             sig = savgol_filter(vOut["V_C Out"], window_length=51, polyorder=3)
@@ -600,97 +607,99 @@ def rtsEval(bank, dieX, dieY):
             peak = find_peaks(y1, width=1, height=100, distance=5)
             YMAX = y1[peak[0]]
             XMAX = x1[peak[0]]
-            if len(peak[0]) >= 2:
-                SlowTrapCounter += 1                                 
-                for k in range(0, len(peak[0])):
-                    if y1[peak[0][k]] == max(YMAX):
-                        steadystate = k
-                rtsAmplitude = x1[peak[0]] - x1[peak[0][steadystate]]
-                rtsAmplitude = rtsAmplitude[rtsAmplitude != 0.]
-                peaks, _ = find_peaks(sig, width=5, prominence=np.abs(min(rtsAmplitude)),      # find peaks of the filtered signal
-                                   rel_height=0.5)
-                peaks2, _ = find_peaks(-sig, width=5, prominence=np.abs(min(rtsAmplitude)))    # find peaks of the negative filtered signal
+            # if len(peak[0]) >= 2:
+            #     SlowTrapCounter += 1                                 
+            for k in range(0, len(peak[0])):
+                if y1[peak[0][k]] == max(YMAX):
+                    steadystate = k
+            rtsAmplitude = x1[peak[0]] - x1[peak[0][steadystate]]
+            rtsAmplitude = rtsAmplitude[rtsAmplitude != 0.]
+            peaks, _ = find_peaks(sig, width=5, prominence=np.abs(min(rtsAmplitude)),      # find peaks of the filtered signal
+                                rel_height=0.5)
+            peaks2, _ = find_peaks(-sig, width=5, prominence=np.abs(min(rtsAmplitude)))    # find peaks of the negative filtered signal
 
-                results_W, results_WH, results_ips, results_rps= peak_widths(sig,           # find the peak widths (capture time)
-                                                                            peaks, rel_height=0.5)
-                results_NW, results_NWH, results_Nips, results_Nrps = peak_widths(-sig,     # find the valley widths (emission time)
-                                                                                peaks2, rel_height=0.5)
-                
+            results_W, results_WH, results_ips, results_rps= peak_widths(sig,           # find the peak widths (capture time)
+                                                                        peaks, rel_height=0.5)
+            results_NW, results_NWH, results_Nips, results_Nrps = peak_widths(-sig,     # find the valley widths (emission time)
+                                                                            peaks2, rel_height=0.5)
+            
                                                                                             # capture and emission maybe flipped depending on signal
-            else: 
-                peaks = []
+            # else: 
+            #     peaks = []
 
-            if len(peaks) >= 2:
-                RTSCounter += 1                                                             #RTS Counter
-                plt.figure(figsize=(12,14))
-                plt.subplot(3, 1, 1)
-                debug = False
-                if debug is False:
-                    plt.plot(vOut['Ticks'], vOut['V_C Out'], label = "$V_{C}$ Out")
-                    plt.plot(vOut.Ticks, sig, label = "Filterd Signal")
-                    plt.xlabel("Time (sec)")
-                else:
-                    plt.plot(vOut['Vsg'], label="$V_{sg}$")
-                    plt.plot(sig, label='Filtered Signal')
-                    plt.plot(peaks, sig[peaks], 'x', color='red')
-                    plt.plot(peaks2, sig[peaks2], 'x', color='green')
-                    plt.hlines(results_WH, results_ips, results_rps, color="C2")
-                    plt.xlabel('Data Points')
-                plt.title("RTS Data: Col: " + str(col) + " Row: " + str(row)) # spec[0]) + " " + str(spec[1]))
+            # if len(peaks) >= 2:
+            RTSCounter += 1                                                             #RTS Counter
+            plt.figure(figsize=(12,14))
+            plt.subplot(2, 1, 1)
+            debug = False
+            if debug is False:
+                plt.plot(vOut['Ticks'], vOut['V_C Out'], label = "$V_{C}$ Out")
+                plt.plot(vOut.Ticks, sig, label = "Filterd Signal")
+                plt.xlabel("Time (sec)")
+                plt.ylabel("$V_{cout}$ [V]")
+            else:
+                plt.plot(vOut['Vsg'], label="$V_{sg}$")
+                plt.plot(sig, label='Filtered Signal')
+                plt.plot(peaks, sig[peaks], 'x', color='red')
+                plt.plot(peaks2, sig[peaks2], 'x', color='green')
+                plt.hlines(results_WH, results_ips, results_rps, color="C2")
+                plt.xlabel('Data Points')
                 plt.ylabel("$V_{sg}$ [V]")
-                plt.legend()
+            plt.title("RTS Data: Col: " + str(columnRX) + " Row: " + str(rowRX)) # spec[0]) + " " + str(spec[1]))
+            
+            plt.legend()
 
-                plt.subplot(3,2,3)
+            plt.subplot(2,2,3)
 
-                frq, P1d = welch(vOut.Vsg, fs=2000, window='hann', nperseg=20000,               #  Compute PSD using welch method
-                                noverlap=None, nfft=20000)
-                p1dSmooth = savgol_filter(P1d, window_length=5, polyorder=1)
+            frq, P1d = welch(vOut.Vsg, fs=2000, window='hann', nperseg=40000,               #  Compute PSD using welch method
+                            noverlap=None, nfft=40000)
+            p1dSmooth = savgol_filter(P1d, window_length=5, polyorder=1)
 
-                plt.yscale('log')
-                plt.title('1/f Noise')
-                plt.ylabel('$S_{id}$' + '($V^2$/Hz)')
-                plt.xlabel("Frequency (Hz)")
-                plt.xscale('log')
-                plt.plot(frq[5:], P1d[5:])
-                plt.plot(frq[5:], p1dSmooth[5:])
+            plt.yscale('log')
+            plt.title('1/f Noise')
+            plt.ylabel('$S_{id}$' + '($V^2$/Hz)')
+            plt.xlabel("Frequency (Hz)")
+            plt.xscale('log')
+            plt.plot(frq[5:], P1d[5:])
+            plt.plot(frq[5:], p1dSmooth[5:])
 
-                plt.subplot(3, 2, 4)    
-                plt.hist(vOut['Vsg'], label = "$V_{sg}$", histtype="stepfilled", bins=50)
-                plt.hist(sig, label = 'Filtered Signal', histtype="stepfilled", bins=50)
-                plt.plot(XMAX, YMAX, 'o')
-                plt.ylabel("Frequency")
-                plt.xlabel("$V_{sg}$ [V]")
-                plt.title('RTS Amplitude = ' + str(rtsAmplitude) + ' (V)')
-                plt.legend()
+            plt.subplot(2, 2, 4)    
+            plt.hist(vOut['Vsg'], label = "$V_{sg}$", histtype="stepfilled", bins=50)
+            # plt.hist(sig, label = 'Filtered Signal', histtype="stepfilled", bins=50)
+            # plt.plot(XMAX, YMAX, 'o')
+            plt.ylabel("Frequency")
+            plt.xlabel("$V_{sg}$ [V]")
+            plt.title('RTS Amplitude = ' + str(rtsAmplitude) + ' (V)')
+            plt.legend()
 
-                plt.subplot(3, 2, 5)
-                plt.hist(results_W/2000, bins=50)
-                meanTauE = np.mean(results_W)/2000
-                plt.xlabel('Time (Sec)')
-                plt.ylabel('Frequency')
-                plt.title('Mean emission time: ' + str(meanTauE))
+            # plt.subplot(3, 2, 5)
+            # plt.hist(results_W/2000, bins=50)
+            # meanTauE = np.mean(results_W)/2000
+            # plt.xlabel('Time (Sec)')
+            # plt.ylabel('Frequency')
+            # plt.title('Mean emission time: ' + str(meanTauE))
 
-                plt.subplot(3, 2, 6)
-                plt.hist((results_NW)/2000, bins=50)
-                meanTauC = np.mean(results_NW)/2000
-                plt.xlabel('Time (Sec)')
-                plt.ylabel('Frequency')
-                plt.title('Mean capture time: ' + str(meanTauC))
-                
-                plt.figtext(.5, .95, "$V_{g}$ = " + str(vg) +" V, $V_{dd}$ = "+ str(vg) + " V, Samp Rate = " + str(sampRate) + " kHz, $I_{d}$ = " + str(Iref) +
-                            ' A', horizontalalignment='center', fontsize = 10)
-                plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + dt_string + ".png")
-                plt.tight_layout()
-                fig1 = plt.show(block = False)
-                # plt.pause(.5)
-                plt.close(fig1)
+            # plt.subplot(3, 2, 6)
+            # plt.hist((results_NW)/2000, bins=50)
+            # meanTauC = np.mean(results_NW)/2000
+            # plt.xlabel('Time (Sec)')
+            # plt.ylabel('Frequency')
+            # plt.title('Mean capture time: ' + str(meanTauC))
+            
+            plt.figtext(.5, .95, "$V_{g}$ = " + str(vg) +" V, $V_{dd}$ = "+ str(vg) + " V, Samp Rate = " + str(sampRate) + " kHz, $I_{d}$ = " + str(Iref) +
+                        ' A', horizontalalignment='center', fontsize = 10)
+            plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + d_string + ".png")
+            plt.tight_layout()
+            fig1 = plt.show(block = False)
+            # plt.pause(.5)
+            plt.close(fig1)
             # else:
             #     rtsAmplitude = "???"
             
             vOut = vOut.reset_index(drop = True, inplace=True)
             smu._write(value='smua.source.output = smua.OUTPUT_OFF')
             smu._write(value='smub.source.output = smub.OUTPUT_OFF')
-            smu._write(value="node[2].smua.source.output = smua.OUTPUT_OFF")
+            # smu._write(value="node[2].smub.source.output = smub.OUTPUT_OFF")
             
         
         print('Slow Trap Count:', SlowTrapCounter)
@@ -701,10 +710,11 @@ def rtsEval(bank, dieX, dieY):
         print('refinedRTS: ', refinedRTS)
         rtsData.at[0, 'totalRTS'] = totalRTS
         rtsData.at[0, 'refinedRTS'] = refinedRTS
-
-        rtsData.to_csv(fileLoc + "_Iref= " + str(Iref) + '_Row'+ rowRX + '.csv')                                   # save after row completes
+        # rtsData.to_csv(fileLoc + "_Iref= " + str(Iref) + '_Row'+ rowRX + '_Loop' + str(loopCounter) +'.csv') 
+        rtsData.to_csv(fileLoc + "_Iref= " + str(Iref) + '_Row'+ rowRX +'.csv')                                   # save after row completes
         # rtsData.to_feather(fileLoc + '_Row'+ rowRX + '.feather')   
         rtsData = rtsData.reset_index(drop=True, inplace=True)                              # delete data frame after row completes
+        # loopCounter += 1
     write_cmd(str(9))                                                   # selects the switch case on the pico
     commandRX = pico.read_until().strip().decode()                                  # confirms mode selected
     print('pico reset the shift registers')
@@ -1001,5 +1011,5 @@ try:
         seuData.at[testNumber, "V_XS"] = v_upsets / fluence
 
         seuData.to_csv(fileLoc, index=False)
-except:
+except Exception as error:
     print("Abort")

@@ -215,19 +215,29 @@ void loop()
 
     case 5: {                               // idvg, rts NMOS Characterization on The bypass
       // command, rowSelect, colSelect
-//        for (int j = rowSelect; j >= 1; j--) {
+      // command, timetest, period
+          double timeTest =  rowSelect;
           double period = colSelect;
-          double dutyCycle = rowSelect;
-          float highTime = period * dutyCycle;
-          float lowTime = 1 - highTime;
-          digitalWrite(CRSTbin, HIGH);
-          waitFor(highTime * 1000);
+          double dutyCycle = .5;      
+              
+          float cycles = timeTest / period;
+          float openTime = period * dutyCycle;
+          float integrateTime = (1 - dutyCycle) * period;  // = period - highTime
+          waitFor(1000);
+          for (int j = cycles; j >= 1; j--) {          
+          digitalWrite(CRSTbin, LOW);               // ctia reset short closed
           digitalWrite(LED, HIGH);
-          digitalWrite(CRSTbin, LOW);
-          waitFor(lowTime * 1000);
+          waitFor(openTime * 1000);
+          digitalWrite(CRSTbin, HIGH);              // ctia reset open, integrate mode
           digitalWrite(LED, LOW);
-//        }
+          waitFor(integrateTime * 1000);
+        }
+          
+
+
+        
 //        Serial.println("");
+        digitalWrite(CRSTbin, LOW);
         command = 0;
         break;
       }

@@ -297,8 +297,6 @@ class KeithleyClass:
 
             # iterate over
             res = self._query(f"next({self._name}, {var_name!r})")
-            # print(len(res))
-            # print(res)
             if res:
                 var_name, var_value = res
                 full_name = self._to_global_name(var_name)
@@ -1373,6 +1371,7 @@ class Keithley2600(Keithley2600Base):
                 # # while loop that runs until the sweep ends
             while self.status.operation.sweeping.condition > 0:                     # check if sweep has ended
                 # print('running')
+
                 # self.waitcomplete()
                 self.trigger.wait(.001)
                 # self.display.trigger.clear()
@@ -1390,7 +1389,7 @@ class Keithley2600(Keithley2600Base):
                 smu.nvbuffer2.clear()
                 smu.nvbuffer1.clearcache()
                 smu.nvbuffer2.clearcache()
-            print('returning data')
+            # print('returning data')
             return v_smu2
 
     def sourceA_Timed(self, 
