@@ -14,16 +14,15 @@ import os
 import pyvisa
 rm = pyvisa.ResourceManager()
 
-# datetime object containing current date and time
 dt_string = datetime.now().strftime("%Y_%m_%d-%I_%M_%S_%p")
-# oscope = OScope("TCPIP0::192.168.4.2::inst0::11
-# INSTR")
 pico = serial.Serial('COM6', baudrate=115200)
 smu = Keithley2600('TCPIP0::192.168.4.11::INSTR')               #set ip addr for smu
 # smu2 = Keithley2600('TCPIP0::192.168.4.12::INSTR')
 powerSupply = rm.open_resource('TCPIP0::192.168.4.3::INSTR') 
 p = Path.home()
-# print(p)
+
+# smu._write("tsplink.reset()")
+
 def powerSupply_Set(channel, voltage, current):
     powerSupply.write("INST " + channel) # Select +6V output ch 1
     powerSupply.write("VOLT " + voltage) # Set output voltage to 3.0 V
@@ -68,7 +67,7 @@ def bankNum(bank, folder):
 
     elif bank == 2:
         colStart = 32 + 1
-        colEnd = colStart + 16
+        colEnd = colStart + 2
 
     elif bank == 3:
         colStart = 48 + 1
@@ -92,29 +91,29 @@ def bankNum(bank, folder):
         
     fileLoc = str(p) + "\\Documents\\SkywaterData\\DOE2\\" + str(folder) + "\\Bank " + str(bank) + "\\" + str(folder)
     rowStart = 0 + 1
-    rowEnd = rowStart + 30 
+    rowEnd = rowStart + 1 
     vg = 3.3
     
-    if folder == 'currentSweep':                     
-        measDelay = -1                      # measurement timer delay 
-        nplc = 16/60                        # integration time. has to be faster than measDelay
-        sweepList = (-1e-8, -1e-4, 30)      # sweep parameters for currentSweep logarithmic sweep   
-                                            # Low number, High number, number of points, asymptote
-        csIn = 3                            # Case select for pico
+    if ((folder == 'currentSweep') or (folder == 'currentSweep_Dual')):                     
+        measDelay   = -1                            # measurement timer delay 
+        nplc        = 16/60                         # integration time. has to be faster than measDelay
+        sweepList   = (-1e-8, -1e-4, 30)            # sweep parameters for currentSweep logarithmic sweep   
+                                                    # Low number, High number, number of points, asymptote
+        csIn        = 3                             # Case select for pico
         send = rowStart, rowEnd, colStart, colEnd, sweepList, csIn, fileLoc, fileLoc, measDelay, nplc, vg
         return send
     
-    elif folder == 'rtsEval':        
-        timeTest = 40                       
-        holdTime = 20  
-        limitv = 3.3                        # voltage source limit of SMU
-        rangev = 20                         # voltage measurement range of SMU
-        period = 40                         # period of duty cycle for CTIA reset pin
-        measDelay = 0.0005                  # measurement timer delay     # 2 kHz
-        nplc = 0.027 / 60                   # integration time. has to be faster than measDelay
-        Iref = -9e-5                        # Value applied to Iref. Id is Iref/10 
-        sampRate = 1 / (measDelay * 1000)   # sample rate of the SMU        
-        csIn = 4                            # Case select for pico
+    elif ((folder == 'rtsEval') or (folder == 'rtsEval_Dual')):        
+        timeTest    = 40                       
+        holdTime    = 15  
+        limitv      = 3.3                           # voltage source limit of SMU
+        rangev      = 20                            # voltage measurement range of SMU
+        period      = timeTest                      # period of duty cycle for CTIA reset pin
+        measDelay   = 0.0005                        # measurement timer delay     # 2 kHz
+        nplc        = 0.027 / 60                    # integration time. has to be faster than measDelay
+        Iref        = -5e-5                         # Value applied to Iref. Id is Iref/10 
+        sampRate    = 1 / (measDelay * 1000)        # sample rate of the SMU        
+        csIn        = 4                             # Case select for pico
         send = rowStart, rowEnd, colStart, colEnd, csIn, fileLoc, measDelay, nplc, vg, Iref, timeTest, holdTime, sampRate, limitv, rangev, period    
         return send
 
@@ -350,8 +349,8 @@ def idvgsCharacterization(bank, dieX, dieY):
         plt.figtext(.35, .95, "$I_{Ref}$ = " + str(sweepList[0]) 
                     + " A to " + str(sweepList[1]) + " A", fontsize = 15)
         plt.figtext(.4, .92, "Current Sweep", fontsize = 15)
-        plt.savefig(fileLoc + "R" + rowRX + "_(" + dieX + "," + dieY + ")_currentSweep.png")
         plt.tight_layout()
+        plt.savefig(fileLoc + "R" + rowRX + "_(" + dieX + "," + dieY + ")_currentSweep.png")
         plt.show(block = False)
         plt.close()
 
@@ -510,8 +509,8 @@ def idvgsCharacterizationV2(bank, dieX, dieY):
         plt.figtext(.35, .95, "$I_{Ref}$ = " + str(sweepList[0]) 
                     + " A to " + str(sweepList[1]) + " A", fontsize = 15)
         plt.figtext(.4, .92, "Row: " + str(rowP) + " Columns: " + str(colS) + ":" + str(colE), fontsize = 15)
+        # plt.tight_layout()
         plt.savefig(fileLoc + "R" + rowRX + "_(" + dieX + "," + dieY + ")_dualNode_currentSweep.png")
-        plt.tight_layout()
         plt.show(block = False)
         plt.close()
 
@@ -521,19 +520,82 @@ def idvgsCharacterizationV2(bank, dieX, dieY):
         vSG       = []
         commandRX=0
         idvgsData.to_csv(fileLoc + 'BAK.csv')
-    
-    
-    write_cmd(str(9))                                                   # selects the switch case on the pico
-    commandRX = pico.read_until().strip().decode()                                  # confirms mode selected
-    print('pico confirmed: ' + str(commandRX) + ' and reset the shift registers')   
+        grouped = idvgsData.groupby(idvgsData.Row)                                                     # group the data by the column "Column"
+        plt.figure(figsize=(12,14))
+        
+        for i in range(rowStart,row):
+            rowRX = str(i)
+            rowRX = re.sub(r'[0-9]+$',
+                        lambda x: f"{str(int(x.group())-1).zfill(len(x.group()))}",
+                        rowRX)  
+            data1 = grouped.get_group(str(rowRX))                                           # gets the group with the specified column number
+            group = data1.groupby(idvgsData.Column)
+            
+            for j in range(colStart, colEnd):
+                columnRX = str(j)
+                columnRX = re.sub(r'[0-9]+$',
+                                lambda x: f"{str(int(x.group())-1).zfill(len(x.group()))}",
+                                columnRX)  
+                
+                vOut = group.get_group(str(columnRX)).reset_index(drop=True) 
+                # print(vOut)
+                # fig, axd = plt.subplot_mosaic(layout, figsize=(12,14))
+                plt.subplot(2,2,1)
+                plt.title("$I_{d}$ [A] vs $V_{C}$ Out")
+                plt.plot(vOut["Id"], vOut["V_C Out"], label = "Col" + str(j))
+                plt.xscale('log')
+                plt.ylabel("$V_{C}$ [V]")
+                plt.xlabel("$I_{d}$ [A]")
+                # axd['A'].legend()
 
+                plt.subplot(2,2,2)
+                plt.title("$I_{d}$ [A] vs $V_{byp}$ [V]")
+                plt.plot(vOut["Id"], vOut["Vbyp"], label = "Col" + str(j)) 
+                plt.xscale('log')
+                plt.ylabel("$V_{byp}$ [V]")
+                plt.xlabel("$I_{d}$ [A]")
+
+                plt.subplot(2,2,3)
+                plt.title("$I_{d}$ [A] vs $V_{sg}$ [V]")
+                plt.plot(vOut["Id"], vOut["Vsg"], label = "Col" + str(j))
+                plt.xscale('log')
+                plt.ylabel("$V_{sg}$ [V]")
+                plt.xlabel("$I_{d}$ [A]")
+                # axd['C'].legend()
+
+                plt.subplot(2,2,4)
+                plt.title("$I_{d}$ [A] vs $V_{sg}$ Bypass Out [V]")
+                plt.plot(vOut["Id"], vOut["Vsg_byp"], label = "Col" + str(j))
+                plt.xscale('log')
+                plt.ylabel("$V_{sg}$ [V]")
+                plt.xlabel("$I_{d}$ [A]")
+                # axd['D'].legend()
+        
+        # plt.tight_layout()        
+        plt.figtext(.35, .95, "$I_{Ref}$ = " + str(sweepList[0])
+                    + " A to " + str(sweepList[1]) + " A", fontsize = 15)
+        plt.figtext(.37, .92, "Rows: " + str(rowStart-1)
+                    + " to " + str(row-1), fontsize = 15)
+        
+        plt.savefig(fileLoc + "_Combined_(" + dieX + "," + dieY + ")_dualNode_currentSweep.png")  
+        plt.show(block = False)
+        plt.close()
     end_total_time = time.time()
     test_time = end_total_time - start_total_time
     idvgsData.at[0, 'Test Time (Sec)'] = test_time
     idvgsData.to_csv(fileLoc + dt_string + '.csv')
+
+    
+    write_cmd(str(9))                                                   # selects the switch case on the pico
+    commandRX, _, _ = tuple(pico.read_until().strip().decode().split(','))                                  # confirms mode selected
+    print('pico confirmed: ' + str(commandRX) + ' and reset the shift registers')   
+
+    
     # print(idvgsData)
-    # smu._write(value='smua.source.output = smua.OUTPUT_OFF')
-    # smu._write(value='smub.source.output = smub.OUTPUT_OFF')
+    smu._write(value='smua.source.output = smua.OUTPUT_OFF')
+    smu._write(value='smub.source.output = smub.OUTPUT_OFF')
+    smu._write(value='node[2].smua.source.output = smua.OUTPUT_OFF')
+    smu._write(value='node[2].smub.source.output = smua.OUTPUT_OFF')
     # smu2._write(value='smua.source.output = smua.OUTPUT_OFF')
     powerSupply_Off()
     return
@@ -578,12 +640,18 @@ def rtsEval(bank, dieX, dieY):
             commandRX = int(pico.read_until().strip().decode())                             # confirms shift registers are loaded
             print(f'Pi Pico loaded the shift registers.')                           # confirms shift registers are loaded
 
+            smu.smub.measure.rangev = rangev
+            smu.smub.source.limitv = limitv
+            smu.smua.measure.rangev = rangev
+            smu.smua.source.limitv = limitv
             smu._write(value = "smua.measure.autozero = smua.AUTOZERO_AUTO")
-            smu._write(value = "smua.source.output = smub.OUTPUT_ON")
+            # smu._write(value = "smua.source.output = smub.OUTPUT_ON")
             smu.smua.measure.v()
             smu.apply_current(smu.smub, Iref)
-            # smu._write(value="node[2].smub.source.func = smub.OUTPUT_DCAMPS")
-            # smu._write(value="node[2].smub.source.output = smub.OUTPUT_ON")
+            smu._write("node[2].smub.measure.rangev = 20")
+            smu._write("node[2].smub.source.limitv = 3.3")
+            smu._write("node[2].smub.source.func = smub.OUTPUT_DCAMPS")
+            smu._write("node[2].smub.source.output = smub.OUTPUT_ON")
             print('Holding for ' + str(holdTime)+ " seconds.")
             time.sleep(holdTime)
             print("Starting " + str(timeTest) + " Second Test.")
@@ -602,104 +670,169 @@ def rtsEval(bank, dieX, dieY):
             vOut['DieY']                = dieY
             print(len(vOut))
             rtsData = pd.concat([rtsData, vOut], axis = 0, ignore_index=True)           # save the new data with old data
-            sig = savgol_filter(vOut["V_C Out"], window_length=51, polyorder=3)
+
+            sig = savgol_filter(vOut["V_C Out"], window_length=11, polyorder=3)
             y1, x1 = np.histogram(sig, bins=50)
-            peak = find_peaks(y1, width=1, height=100, distance=5)
+            peak = find_peaks(y1, width=1, height=100)
             YMAX = y1[peak[0]]
-            XMAX = x1[peak[0]]
-            # if len(peak[0]) >= 2:
-            #     SlowTrapCounter += 1                                 
-            for k in range(0, len(peak[0])):
-                if y1[peak[0][k]] == max(YMAX):
-                    steadystate = k
-            rtsAmplitude = x1[peak[0]] - x1[peak[0][steadystate]]
-            rtsAmplitude = rtsAmplitude[rtsAmplitude != 0.]
-            peaks, _ = find_peaks(sig, width=5, prominence=np.abs(min(rtsAmplitude)),      # find peaks of the filtered signal
-                                rel_height=0.5)
-            peaks2, _ = find_peaks(-sig, width=5, prominence=np.abs(min(rtsAmplitude)))    # find peaks of the negative filtered signal
+            XMAX = x1[peak[0]]                            
+                
+            slopeSig1 = np.gradient(sig, vOut['Ticks'], edge_order=2)
+            slopeSig = savgol_filter(slopeSig1, window_length=10, polyorder=2)
+            slopeSigN1 = np.gradient(-sig, vOut['Ticks'], edge_order=2)
+            slopeSigN = savgol_filter(slopeSigN1, window_length=10, polyorder=2)
 
-            results_W, results_WH, results_ips, results_rps= peak_widths(sig,           # find the peak widths (capture time)
-                                                                        peaks, rel_height=0.5)
-            results_NW, results_NWH, results_Nips, results_Nrps = peak_widths(-sig,     # find the valley widths (emission time)
-                                                                            peaks2, rel_height=0.5)
+            wSize = 100
             
-                                                                                            # capture and emission maybe flipped depending on signal
-            # else: 
-            #     peaks = []
+            # dataTemp = pd.DataFrame(data=[], index=[], columns=[])
+            # dataTemp['sig']    = savgol_filter(slopeSig1, window_length=26, polyorder=2)
+            # dataTemp['std']    = dataTemp['sig'].rolling(wSize).std()
+            # dataTemp['mean']   = dataTemp['sig'].rolling(wSize).mean()
 
-            # if len(peaks) >= 2:
-            RTSCounter += 1                                                             #RTS Counter
-            plt.figure(figsize=(12,14))
-            plt.subplot(2, 1, 1)
-            debug = False
-            if debug is False:
-                plt.plot(vOut['Ticks'], vOut['V_C Out'], label = "$V_{C}$ Out")
-                plt.plot(vOut.Ticks, sig, label = "Filterd Signal")
-                plt.xlabel("Time (sec)")
-                plt.ylabel("$V_{cout}$ [V]")
-            else:
-                plt.plot(vOut['Vsg'], label="$V_{sg}$")
-                plt.plot(sig, label='Filtered Signal')
-                plt.plot(peaks, sig[peaks], 'x', color='red')
-                plt.plot(peaks2, sig[peaks2], 'x', color='green')
-                plt.hlines(results_WH, results_ips, results_rps, color="C2")
-                plt.xlabel('Data Points')
-                plt.ylabel("$V_{sg}$ [V]")
-            plt.title("RTS Data: Col: " + str(columnRX) + " Row: " + str(rowRX)) # spec[0]) + " " + str(spec[1]))
+            certainty = 10
+            std = np.std(slopeSig)
+            mean = np.mean(slopeSig)
+            sigma = mean + std * certainty
+            sigmaN = mean - std * certainty
+
+            # sigmas = np.mean(dataTemp['mean']) + np.std(dataTemp['std']) * 12
+
+            edges = find_peaks(slopeSig, height=sigma, width=3)
+            edgesF = find_peaks(slopeSigN, height=np.abs(sigmaN), width=3)
+            # critPoint   = find_peaks(dataTemp['std'], height = sigmas, distance = 100)
+            # critPoint   = critPoint[critPoint[0] > 30000]
+            # point = critPoint[0] -int(wSize/2)
+            print(sig[edges[0]])
+
+
+            # if len(critPoint[0]) == 1:
+            #     vOut.Integrate = vOut['V_C Out'].iloc[point[0]:]
+            #     vOut.SteadyState = vOut['V_C Out'].iloc[:point[0]]
+            # elif len(critPoint[0]) > 1:
+            #     vOut.Integrate = vOut['V_C Out'].iloc[point[0]:point[1]]
+            #     # vOut.SteadyState = np.full_like(vOut['V_C Out'].iloc[point[0]:point[1]], None)
+            #     vOut.SteadyState = np.where(((sig < vOut['Threshold'])), vOut['V_C Out'], None)
+            if (len(sig[edges[0]]) > 0):
+                
+                threshold = np.mean(sig[edges[0]])
+                vOut['Integrate'] = np.full_like(vOut['V_C Out'], None)
+                vOut['SteadyState'] = np.full_like(vOut['V_C Out'], None) 
+                vOut['Threshold'] = np.full_like(vOut['V_C Out'], threshold)
+                
+                vOut['Integrate'] = np.where(sig > vOut['Threshold'], vOut['V_C Out'], None)
+                vOut['SteadyState'] = np.where(sig < vOut['Threshold'], vOut['V_C Out'], None)
+                
+                RTSCounter += 1                                                             #RTS Counter
+                
+                layout = [
+                    ["A", "A", "A"],
+                    ["B", "B", "C"],
+                    ["D", "D", "E"]
+                ]
+
+                fig, axd = plt.subplot_mosaic(layout, figsize=(14,14))
+
+                axd["A"].plot(vOut['Ticks'], vOut['Integrate'], label = "$V_{C}$ Out Integrate Mode", color='#B22222')
+                axd["A"].plot(vOut['Ticks'], vOut['SteadyState'], label = "$V_{C}$ Out Steady State", color='dimgrey')
+                axd["A"].plot(vOut['Ticks'], sig, label = "Filterd Signal", color='darkorange')
+                # axd["A"].plot(vOut['Ticks'][critPoint[0]-wSize/2], vOut['V_C Out'][critPoint[0]-wSize/2], 'x', color='black')
+                axd["A"].hlines(threshold, 0, max(vOut['Ticks']), color='black')
+                axd["A"].set_xlabel("Time (sec)")
+                axd["A"].set_ylabel("$V_{cout}$ [V]")
+                axd["A"].set_title("RTS Data: Col: " + str(columnRX) + " Row: " + str(rowRX)) 
+                axd["A"].legend()
+                
+                
+                dataTemp = pd.DataFrame(data=[], index=[], columns=[])
+                # print(vOut['Integrate'])
+                dataTemp['data'] = vOut['Integrate']
+                dataTemp['Ticks'] = vOut.Ticks
+                dataTemp = dataTemp.dropna()
+                filtI = savgol_filter(dataTemp.data, window_length=11, polyorder=3)
+                axd["B"].plot(dataTemp['Ticks'], dataTemp['data'], label = "$V_{C}$ Out Integrate Mode", color='#B22222')
+                axd["B"].plot(dataTemp['Ticks'], filtI, label = "Filtered Signal", color='darkorange')
+                axd["B"].set_xlabel("Time (sec)")
+                axd["B"].set_ylabel("$V_{cout}$ [V]")
+                # axd["B"].legend()
+
+                y1, x1 = np.histogram(filtI, bins=50)
+                peak = find_peaks(y1, width=1, height=100, distance=5)
+                YMAX = y1[peak[0]]
+                XMAX = x1[peak[0]]
+
+                # for k in range(0, len(peak[0])):
+                #     if y1[peak[0][k]] == max(YMAX):
+                #         steadystate = k
+                # rtsAmplitude = x1[peak[0]] - x1[peak[0][steadystate]]
+                # rtsAmplitude = rtsAmplitude[rtsAmplitude != 0.]
+
+                axd["C"].hist(dataTemp['data'], label = "$V_{C}$ Out Integrate", histtype="stepfilled", bins=50, color='#B22222')
+                axd["C"].hist(filtI, label = 'Filtered Signal', histtype="stepfilled", bins=50, color='darkorange')
+                axd["C"].plot(XMAX, YMAX, 'o')
+                axd["C"].set_ylabel("Frequency")
+                axd["C"].set_xlabel("$V_{C}$ Out [V]")
+                axd["C"].set_title('RTS Amplitude = ' + str('???') + ' (V)')
+                # axd["C"].legend()
+
+                dataTemp = pd.DataFrame(data=[], index=[], columns=[])
+                dataTemp['data'] = vOut['SteadyState']
+                dataTemp['Ticks'] = vOut.Ticks
+                dataTemp['data'] = np.where(dataTemp['Ticks'] > max(dataTemp['Ticks'])*.55, None, dataTemp['data'])
+                dataTemp = dataTemp.dropna()
+                filtI = savgol_filter(dataTemp.data, window_length=11, polyorder=3)
+                axd["D"].plot(dataTemp['Ticks'], dataTemp['data'], label = "$V_{C}$ Out Steady State", color='dimgrey')
+                axd["D"].plot(dataTemp['Ticks'], filtI, label = "Filtered Signal", color='darkorange')
+                axd["D"].set_xlabel("Time (sec)")
+                axd["D"].set_ylabel("$V_{cout}$ [V]")
+                # axd["D"].legend()
+
+                y1, x1 = np.histogram(filtI, bins=50)
+                peak = find_peaks(y1, width=1, height=100, distance=5)
+                YMAX = y1[peak[0]]
+                XMAX = x1[peak[0]]
+
+                # for k in range(0, len(peak[0])):
+                #     if y1[peak[0][k]] == max(YMAX):
+                #         steadystate = k
+                # rtsAmplitude = x1[peak[0]] - x1[peak[0][steadystate]]
+                # rtsAmplitude = rtsAmplitude[rtsAmplitude != 0.]
+                
+                axd["E"].hist(dataTemp['data'], label = "$V_{C}$ Out Integrate", histtype="stepfilled", bins=50, color='dimgrey')
+                axd["E"].hist(filtI, label = 'Filtered Signal', histtype="stepfilled", bins=50, color='darkorange')
+                axd["E"].plot(XMAX, YMAX, 'o')
+                axd["E"].set_ylabel("Frequency")
+                axd["E"].set_xlabel("$V_{C}$ Out [V]")
+                # axd["E"].set_title('RTS Amplitude = ' + str(rtsAmplitude) + ' (V)')
+                axd["E"].set_title('RTS Amplitude = ' + str('???') + ' (V)')
+                # axd["E"].legend()
+
+                # plt.subplot(3,2,5)
+
+                # frq, P1d = welch(vOut['Integrate'], fs=sampRate, window='hann', nperseg=len(vOut['Integrate']),               #  Compute PSD using welch method
+                #                 noverlap=None, nfft=len(vOut['Integrate']))
+                # p1dSmooth = savgol_filter(P1d, window_length=5, polyorder=1)
+
+                # plt.yscale('log')
+                # plt.title('1/f Noise of Integrate Mode')
+                # plt.ylabel('$S_{id}$' + '($V^2$/Hz)')
+                # plt.xlabel("Frequency (Hz)")
+                # plt.xscale('log')
+                # plt.plot(frq[5:], P1d[5:])
+                # plt.plot(frq[5:], p1dSmooth[5:])
+                
+                plt.figtext(.5, .95, "$V_{g}$ = " + str(vg) +" V, $V_{dd}$ = "+ str(vg) + " V, Samp Rate = " + str(sampRate) 
+                            + " kHz, $I_{d}$ = " + str(Iref/10) + ' A', horizontalalignment='center', fontsize = 10)
+                # plt.tight_layout()
+                plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + d_string + ".png")
+                fig1 = plt.show(block = False)
+                # plt.pause(.5)
+                plt.close(fig1)
             
-            plt.legend()
-
-            plt.subplot(2,2,3)
-
-            frq, P1d = welch(vOut.Vsg, fs=2000, window='hann', nperseg=40000,               #  Compute PSD using welch method
-                            noverlap=None, nfft=40000)
-            p1dSmooth = savgol_filter(P1d, window_length=5, polyorder=1)
-
-            plt.yscale('log')
-            plt.title('1/f Noise')
-            plt.ylabel('$S_{id}$' + '($V^2$/Hz)')
-            plt.xlabel("Frequency (Hz)")
-            plt.xscale('log')
-            plt.plot(frq[5:], P1d[5:])
-            plt.plot(frq[5:], p1dSmooth[5:])
-
-            plt.subplot(2, 2, 4)    
-            plt.hist(vOut['Vsg'], label = "$V_{sg}$", histtype="stepfilled", bins=50)
-            # plt.hist(sig, label = 'Filtered Signal', histtype="stepfilled", bins=50)
-            # plt.plot(XMAX, YMAX, 'o')
-            plt.ylabel("Frequency")
-            plt.xlabel("$V_{sg}$ [V]")
-            plt.title('RTS Amplitude = ' + str(rtsAmplitude) + ' (V)')
-            plt.legend()
-
-            # plt.subplot(3, 2, 5)
-            # plt.hist(results_W/2000, bins=50)
-            # meanTauE = np.mean(results_W)/2000
-            # plt.xlabel('Time (Sec)')
-            # plt.ylabel('Frequency')
-            # plt.title('Mean emission time: ' + str(meanTauE))
-
-            # plt.subplot(3, 2, 6)
-            # plt.hist((results_NW)/2000, bins=50)
-            # meanTauC = np.mean(results_NW)/2000
-            # plt.xlabel('Time (Sec)')
-            # plt.ylabel('Frequency')
-            # plt.title('Mean capture time: ' + str(meanTauC))
-            
-            plt.figtext(.5, .95, "$V_{g}$ = " + str(vg) +" V, $V_{dd}$ = "+ str(vg) + " V, Samp Rate = " + str(sampRate) + " kHz, $I_{d}$ = " + str(Iref) +
-                        ' A', horizontalalignment='center', fontsize = 10)
-            plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + d_string + ".png")
-            plt.tight_layout()
-            fig1 = plt.show(block = False)
-            # plt.pause(.5)
-            plt.close(fig1)
-            # else:
-            #     rtsAmplitude = "???"
-            
+            vOut.to_feather(fileLoc + str(col) + "_Bak.feather")
             vOut = vOut.reset_index(drop = True, inplace=True)
             smu._write(value='smua.source.output = smua.OUTPUT_OFF')
             smu._write(value='smub.source.output = smub.OUTPUT_OFF')
-            # smu._write(value="node[2].smub.source.output = smub.OUTPUT_OFF")
+            smu._write(value="node[2].smub.source.output = smub.OUTPUT_OFF")
             
         
         print('Slow Trap Count:', SlowTrapCounter)
@@ -711,14 +844,13 @@ def rtsEval(bank, dieX, dieY):
         rtsData.at[0, 'totalRTS'] = totalRTS
         rtsData.at[0, 'refinedRTS'] = refinedRTS
         # rtsData.to_csv(fileLoc + "_Iref= " + str(Iref) + '_Row'+ rowRX + '_Loop' + str(loopCounter) +'.csv') 
-        rtsData.to_csv(fileLoc + "_Iref= " + str(Iref) + '_Row'+ rowRX +'.csv')                                   # save after row completes
-        # rtsData.to_feather(fileLoc + '_Row'+ rowRX + '.feather')   
+        rtsData.to_feather(fileLoc + "_Iref= " + str(Iref) + '_Row='+ str(row-1) +'.feather')                                   # save after row completes
+        # rtsData.to_feather(fileLoc + "_Iref= " + str(Iref) + '_Row='+ rowRX + '.feather')   
         rtsData = rtsData.reset_index(drop=True, inplace=True)                              # delete data frame after row completes
         # loopCounter += 1
     write_cmd(str(9))                                                   # selects the switch case on the pico
     commandRX = pico.read_until().strip().decode()                                  # confirms mode selected
     print('pico reset the shift registers')
-    # rtsData.to_csv(fileLoc + dt_string + '.csv')
 
     return 
 
@@ -885,8 +1017,8 @@ def rtsEval_V2(bank, dieX, dieY):
                 
                 plt.figtext(.5, .95, "$V_{g}$ = " + str(vg) +" V, $V_{dd}$ = "+ str(vg) + " V, Samp Rate = " + str(sampRate) + " kHz, $I_{d}$ = " + str(Iref) +
                             ' A', horizontalalignment='center', fontsize = 10)
-                plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + dt_string + ".png")
                 plt.tight_layout()
+                plt.savefig(fileLoc + "_C" + columnRX + "R" + rowRX + " " + dt_string + ".png")
                 fig1 = plt.show(block = False)
                 # plt.pause(.5)
                 plt.close(fig1)
@@ -942,27 +1074,27 @@ def doe1_ShiftRegister(seconds):
 # Test selection script
 test = int(input("Which test are you running? "))
 
-try:
-    if test == 1:
-        print("Amp Characterization is selected.")
-        bank = int(input("Which amp are you testing? "))
-        doe2_ampCharacterization(bank, 1)               # (amp, test)
+# try:
+if test == 1:
+    print("Amp Characterization is selected.")
+    bank = int(input("Which amp are you testing? "))
+    doe2_ampCharacterization(bank, 1)               # (amp, test)
 
-    elif test == 2:
-        print("Current sweep test is selected.")
-        bank = int(input("Which bank are you testing? "))
-        # idvgsCharacterization(bank, '3K', '10')   # (bank, DieX, DieY, Bypass)
-        # smu._query('DOE2()')
-        # time.sleep(1)
-        idvgsCharacterizationV2(bank, '3K', '10')   # (bank, DieX, DieY, Bypass)
-        
-    elif test == 3:        
-        print("RTS Evaluation test is selected.")
-        bank = int(input("Which bank are you testing? "))
-        rtsEval(bank, '3K', '10')                  # (bank, DieX, DieY, Bypass)
-        # rtsEval_V2(bank, '3K', '10')                  # (bank, DieX, DieY, Bypass)
-        
-    elif test == 4:
+elif test == 2:
+    print("Current sweep test is selected.")
+    bank = int(input("Which bank are you testing? "))
+    # idvgsCharacterization(bank, '3K', '10')   # (bank, DieX, DieY, Bypass)
+    # smu._query('DOE2()')
+    # time.sleep(1)
+    idvgsCharacterizationV2(bank, '3K', '10')   # (bank, DieX, DieY, Bypass)
+    
+elif test == 3:        
+    print("RTS Evaluation test is selected.")
+    bank = int(input("Which bank are you testing? "))
+    rtsEval(bank, '3K', '10')                  # (bank, DieX, DieY, Bypass)
+    # rtsEval_V2(bank, '3K', '10')                  # (bank, DieX, DieY, Bypass)
+    
+elif test == 4:
         print("Selected Shift Register SEU Test")
         fileLoc = str(p) + "/Documents/LBNL2023/ShiftRegisterSEU/runlog.csv"
         path = Path(fileLoc)
@@ -1011,5 +1143,5 @@ try:
         seuData.at[testNumber, "V_XS"] = v_upsets / fluence
 
         seuData.to_csv(fileLoc, index=False)
-except Exception as error:
-    print("Abort")
+# except Exception as error:
+#     print("Abort")

@@ -2181,8 +2181,8 @@ class Keithley2600(Keithley2600Base):
             return v_smu1, i_smu2
        
     def dualSMU(self,                            # DOE 1 amp characterization evaluation
-                    smu1: KeithleyClass,                    # Source
-                    smu2: KeithleyClass):
+                smu1: KeithleyClass,                    # Source
+                smu2: KeithleyClass):
         # self.node[1].source.output = smu1.OUTPUT_ON
         # self.node[1].source.output = smu2.OUTPUT_ON
         # self.node[2].source.output = smu3.OUTPUT_ON
